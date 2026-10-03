@@ -1,0 +1,26 @@
+services:
+  haproxy:
+    image: haproxy:3.2.0-alpine
+    container_name: haproxy
+    restart: unless-stopped
+
+    ports:
+      - 80:80
+      - 443:443
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./scripts:/usr/local/bin/haproxy-scripts:ro
+      - "${LETSENCRYPT_DIR:?Укажите LETSENCRYPT_DIR в .env}:/etc/letsencrypt:ro"
+
+    entrypoint: ["/bin/sh", "/usr/local/bin/haproxy-scripts/entrypoint.sh"]
+
+    networks:
+      - haproxy
+
+networks:
+  haproxy:
+    name: haproxy
