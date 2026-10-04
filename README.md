@@ -1,8 +1,46 @@
 # HAProxy: домены и backend-сервисы
 
 HAProxy выбирает сертификат по SNI, а backend — по HTTP-заголовку `Host`.
-В конфигурации сертификаты автоматически загружаются из `/tmp/certs/`; отдельная
-запись для каждого сертификата в `haproxy.cfg` не нужна.
+PEM-файлы экспортирует отдельный репозиторий `certbot_deploy` в `export/haproxy/`;
+HAProxy подключает этот каталог только для чтения и загружает из него сертификаты
+автоматически. Отдельная запись для каждого сертификата в `haproxy.cfg` не нужна.
+
+## Подключение к Certbot
+
+1. В `certbot_deploy` включите `hooks/deploy.d/export-pem.sh.example` как описано в
+   README того репозитория и выпустите сертификат. HAProxy не запустится без хотя
+   бы одного PEM-файла, поэтому сначала получите сертификат.
+2. Скопируйте `.env.example` в `.env` и укажите абсолютный путь к каталогу
+   `export/haproxy/` на хосте. `EXPORT_GID` должен совпадать с `EXPORT_GID` в
+   `.env` репозитория Certbot:
+
+   ```sh
+   cp .env.example .env
+   ```
+
+3. Запустите HAProxy: `docker compose up -d`.
+4. Чтобы HAProxy перечитывал новые PEM после успешного обновления, настройте
+   необязательный `hooks/after-renew.sh` в репозитории Certbot. Пример содержимого
+   (замените путь на каталог этого репозитория):
+
+   ```sh
+   #!/bin/sh
+   set -eu
+   cd /srv/haproxy
+   docker compose exec -T haproxy \
+     /bin/sh /usr/local/bin/haproxy-scripts/reload-certs.sh
+   ```
+
+   Сделайте hook исполняемым (`chmod +x hooks/after-renew.sh`). Он выполняется на
+   хосте от имени пользователя, запустившего Certbot; для доступа к Docker обычно
+   его запускают через cron от root. Если `docker compose exec` не может подключиться
+   к HAProxy, hook завершится ошибкой — в частности, это возможно, если HAProxy
+   ещё не запущен.
+
+Certbot и HAProxy должны иметь доступ к экспортированным PEM по числовому GID.
+`group_add` в Compose добавляет HAProxy группу `EXPORT_GID`; права на каталог и
+файлы настраиваются в `certbot_deploy`. Каталог `letsencrypt/live/` HAProxy не
+подключает и PEM самостоятельно не собирает.
 
 ## Добавление домена и сервиса
 
@@ -10,7 +48,21 @@ HAProxy выбирает сертификат по SNI, а backend — по HTTP
 внутренний порт приложения — `8080`.
 
 1. Убедитесь, что DNS домена указывает на сервер, а сертификат включает этот домен.
-2. Подключите `blog` к сети `haproxy`.
+2. Подключите `blog` к общей Docker-сети `haproxy`. Этот Compose-файл создаёт её;
+   в Compose-файле приложения объявите её внешней:
+
+   ```yaml
+   services:
+     blog:
+       networks:
+         - haproxy
+
+   networks:
+     haproxy:
+       external: true
+       name: haproxy
+   ```
+
 3. Добавьте правило в `frontend https`, перед `default_backend`:
 
    ```haproxy
@@ -88,11 +140,13 @@ docker compose exec haproxy \
   haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
 ```
 
-После успешной проверки выполните мягкую перезагрузку HAProxy:
+После обновления PEM выполните мягкую перезагрузку HAProxy (эта команда также
+перечитывает конфигурацию):
 
 ```bash
 docker compose exec -T haproxy \
   /bin/sh /usr/local/bin/haproxy-scripts/reload-certs.sh
 ```
 
-Скрипт подготовит сертификаты и перезагрузит HAProxy вместе с конфигурацией.
+Обычно эту команду вызывает хостовый `hooks/after-renew.sh` из репозитория
+Certbot. Сам HAProxy PEM-файлы не генерирует.

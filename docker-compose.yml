@@ -8,13 +8,13 @@ services:
       - 80:80
       - 443:443
 
-    env_file:
-      - .env
-
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - ./scripts:/usr/local/bin/haproxy-scripts:ro
-      - "${LETSENCRYPT_DIR:?Укажите LETSENCRYPT_DIR в .env}:/etc/letsencrypt:ro"
+      - "${HAPROXY_CERTS_DIR:?Укажите HAPROXY_CERTS_DIR в .env}:/etc/haproxy/certs:ro"
+
+    group_add:
+      - "${EXPORT_GID:?Укажите EXPORT_GID в .env}"
 
     entrypoint: ["/bin/sh", "/usr/local/bin/haproxy-scripts/entrypoint.sh"]
 
